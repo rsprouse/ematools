@@ -8,17 +8,17 @@ Python tools for working with EMA data.
 # Usage
 
 ```python
-from ematools import EmaUCSFDataLoader as DataLoader
+from ematools import EmaUcsfDataLoader as DataLoader
 
 datadir = '/path/to/subject_data'
 loader = DataLoader(datadir)
 
 speaker_id = '7'
 dataname = 'MOCHA_TIMIT'
-utterance = '013'
-channel = 0
-rate, audio = loader.get_audio(speakerid, dataname, utterance, channel)
-df = loader.get_speaker_utt(speakerid, dataname, utterance)
+sentnum = '013'
+audiochan = 0
+aurate, audio = loader.get_audio(speakerid, dataname, utterance, audiochan)
+df = loader.get_utterance(speakerid, dataname, utterance)
 ```
 
 If you don't want all of the data columns, you can exclude particular sensor
@@ -26,7 +26,7 @@ prefixes:
 
 ```python
 excludelist=['REF', 'UNK', 'EMPTY']
-df = loader.get_speaker_utt(
+df = loader.get_utterance(
     speakerid,
     dataname,
     utterance,
@@ -34,7 +34,7 @@ df = loader.get_speaker_utt(
 )
 ```
 
-The DataFrame returned by `get_speaker_utt()` is expected to contain a time
+The DataFrame returned by `get_utterance()` is expected to contain a time
 column named `sec` (if the `.ndi` file contains a column named `time` it
 will be renamed `sec`).
 
@@ -67,5 +67,8 @@ names plus a suffix:
 # E.g. calculate first differentials and add as columns
 # ['UL_x_vel', 'UL_y_vel', 'UL_z_vel']
 df = df.join(df[coordcols].diff(), rsuffix='_vel')
+
+# Same as above, with some smoothing
+df = df.join(df[coordcols].rolling(3, center=True).diff(), rsuffix='_vel')
 ```
  
