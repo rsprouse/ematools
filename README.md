@@ -8,7 +8,7 @@ Python tools for working with EMA data.
 # Usage
 
 ```python
-from ematools import EmaUcsfDataLoader as DataLoader
+from ematools.data_loader import EmaUcsfDataLoader as DataLoader
 
 datadir = '/path/to/subject_data'
 loader = DataLoader(datadir)
