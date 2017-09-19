@@ -1,11 +1,11 @@
 # ematools
 Python tools for working with EMA data.
 
-# Install
+## Install
 
     pip install git+git://github.com/rsprouse/ematools
 
-# Usage
+## Usage
 
 ```python
 from ematools.data_loader import EmaUcsfDataLoader as DataLoader
@@ -50,7 +50,7 @@ one of `x`, `y`, `z`, `q0`, `qx`, `qy`, `qz`. There may also be other
 columns of the form `<sensor>_<name>`, where `<name>` can be any arbitrary
 name.
 
-# Adding derivative columns
+## Adding derivative columns
 
 You might be interested in adding new columns to your DataFrame that are
 calculated from existing columns. To start you can find the names of the
@@ -78,7 +78,7 @@ df = df.join(df[coordcols].diff(), rsuffix='_vel')
 df = df.join(df[coordcols].rolling(3, center=True).diff(), rsuffix='_vel')
 ```
  
-# Subject metadata
+## Subject metadata
 
 Per-subject metadata is stored in the file `SN<subj_num>_metadata.yaml` in
 the subject folder. The yaml file instantiates a Python dict. The `paltrace`
