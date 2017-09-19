@@ -7,12 +7,13 @@ Python tools for working with EMA data.
 
 ## Usage
 
+### Load UCSF data
+
 ```python
-from ematools.data_loader import EmaUcsfDataLoader as DataLoader
-import wavio
+from ematools.data import UCSFData
 
 datadir = '/path/to/subject_data'
-loader = DataLoader(datadir)
+ucdata = UCSFData(datadir)
 
 # Utterance-specific values.
 speaker_id = '7'
@@ -21,20 +22,21 @@ sentnum = '013'
 audiochan = 0
 
 # Get absolute path to an utterance without extension.
-fpath = loader.get_utterance_path(speakerid, dataname, sentnum)
+fpath = ucdata.get_utterance_path(speakerid, dataname, sentnum)
 
+import wavio
 w = wavio.read('{}.wav'.format(fpath))
 aurate = w.rate
 audio = w.data[:, audiochan])
  
-df = loader.get_utterance_df('{}.ndi'.format(fpath))
+df = ucdata.get_utterance_df('{}.ndi'.format(fpath))
 ```
 
 If you don't want all of the data columns, you can exclude particular sensor
 measurements with `drop_prefixes`:
 
 ```python
-df = loader.get_utterance_df(
+df = ucdata.get_utterance_df(
     '{}.ndi'.format(fpath),
     drop_prefixes=['REF', 'UNK', 'EMPTY']
 )
@@ -59,10 +61,10 @@ quaternion values with `get_quatcols()`:
 
 ```python
 # returns e.g. ['UL_x', 'UL_y', 'UL_z']
-coordcols = loader.get_coordcols(df)
+coordcols = ucdata.get_coordcols(df)
 
 # returns e.g. ['UL_q0', 'UL_qx', 'UL_qy', 'UL_qz']
-quatcols = loader.get_quatcols(df)
+quatcols = ucdata.get_quatcols(df)
 ```
 
 With the list of coordinate columns in hand you can perform a calculation
