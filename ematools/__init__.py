@@ -309,7 +309,7 @@ class BiteplateRec(ABC):
             y = np.cross(z, ms_t)        # y is perpendicular to z and ms
             y = y / np.linalg.norm(y)
 
-            x = np.cross(z, y)
+            x = np.cross(y, z)
             x = x / np.linalg.norm(x)
 
             m = np.array([x, y, z])    # rotation matrix directly
