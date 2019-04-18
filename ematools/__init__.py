@@ -1,4 +1,6 @@
+from abc import ABC, abstractproperty
 import numpy as np
+import pandas as pd
 import rowan
 
 class NDIData(object):
@@ -50,7 +52,12 @@ class NDIData(object):
     def __init__(self, tsvname, colmap, replace_bad=True, time_col='Wav Time'):
         ''''''
         self._sensors = None
-        self.colmap = {s: idx for idx, s in enumerate(colmap) if s is not None}
+        if isinstance(colmap, dict):
+            self.colmap = colmap
+        else:
+            self.colmap = {
+                s: idx for idx, s in enumerate(colmap) if s is not None
+            }
         cols_per_sensor = 10  # Number of columns for each sensor
         cols_at_left = 1      # Number of columns at left, before sensor columns
         usecols = list(np.arange(cols_at_left))
@@ -117,17 +124,13 @@ class NDIData(object):
             msg = 'Q/T channels are not equally-spaced!\n'
             raise RuntimeError(msg)
 
-        # Calculate the indexes of the selected Q0/Tx columns.
-        step = int(np.diff(q0s)[0])
         # First get sensor indexes, e.g. in range 0-15.
         if sensors is None:  # Use all sensors.
-            snums = np.arange(len(q0s))
+            snums = q0s
         else:
-            snums = np.array(
-                [idx for idx, s in enumerate(self.sensors) if s in sensors]
-            )
-        # Multiply by step and add column offset from left.
-        snums = (snums * step) + q0s[0]
+            snums = q0s[
+                [np.where(np.array(self.sensors) == s)[0][0] for s in sensors]
+            ]
         # Add the x,y,z column indexes and flatten the list.
         if qt == 'Q':
             qnums = [(n, n+1, n+2, n+3) for n in snums]
@@ -232,7 +235,7 @@ class NDIData(object):
                     q, t = rowan.mapping.davenport(hdvals[n,:3,:], fixed_ref)
                     tvals[n,:,:] = rowan.rotate(q, tvals[n,:,:]) + t
                 except Exception as e:
-                    pass
+                    tvals[n,:,:] = np.nan
         return tvals
 
     def time_range_as_int_index(self, start=None, end=None):
@@ -266,7 +269,7 @@ class NDIData(object):
 class BiteplateRec(ABC):
     '''A mixin for biteplate reference recordings.'''
     _origin = None
-    _center = None
+    _nasion = None
     _right = None
     _left = None
     _head_loc = None
@@ -278,6 +281,10 @@ class BiteplateRec(ABC):
         the origin.
         '''
         pass
+
+    @property
+    def fixed_sensors(self):
+        return [self._nasion, self._right, self._left]
 
     @property
     def fixed_ref(self):
@@ -308,10 +315,11 @@ class BiteplateRec(ABC):
             m = np.array([x, y, z])    # rotation matrix directly
 
             # 3) now rotate the mastoid points - using the rotation matrix
+            ref_t = np.dot(ref_t, m.T)
             rma_t = np.dot(rma_t, m.T) 
             lma_t = np.dot(lma_t, m.T)
 
-            self._head_loc = np.vstack([rma_t, lma_t, ref_t])
+            self._head_loc = np.vstack([ref_t, rma_t, lma_t])
         return self._head_loc
 
     def translated_sensors(self, sensors):
