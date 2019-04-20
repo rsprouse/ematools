@@ -2,6 +2,7 @@ from abc import ABC, abstractproperty
 import numpy as np
 import pandas as pd
 import rowan
+import ematools.robustsmoothing
 
 class NDIData(object):
     '''
@@ -218,7 +219,7 @@ class NDIData(object):
         return self._qt_getter('Q', sensors, start, end)
 
     def tvals(self, sensors=None, start=None, end=None, fixed_ref=None,
-        fixed_sensors=None):
+        fixed_sensors=None, smoothn=False, smoothnargs={}):
         '''Return the Tx, Ty, Tz values for given sensors as a 3d ndarray.
         If sensors is None, return all sensors.
         
@@ -228,6 +229,8 @@ class NDIData(object):
             xyz coordinates
         '''
         tvals = self._qt_getter('T', sensors, start, end)
+        if smoothn is True:
+            tvals = robustsmoothing.smoothn(tvals, **smoothnargs)[0]
         if fixed_ref is not None:
             hdvals = self._qt_getter('T', fixed_sensors, start, end)
             for n in np.arange(tvals.shape[0]):
