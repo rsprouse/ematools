@@ -187,14 +187,18 @@ class NDIData(object):
         '''Return the mean x, y, z for sensor, excluding NaN.'''
         return np.nanmean(np.squeeze(self.tvals(sensor)), axis=0)
 
-    def _qt_getter(self, qt, sensors=None, start=None, end=None):
+    def _qt_getter(self, qt, sensors=None, start=None, end=None,
+            smoothn=False, smoothnargs={}):
         '''Get Q and/or T values. To be called by qtvals(), qvals(), tvals().'''
         qtlen = {'QT': 7, 'Q': 4, 'T': 3}
         tidx = self.time_range_as_int_index(start, end)
         if isinstance(sensors, str):
             sensors = [sensors]
         d = self.df.iloc[tidx, self.qtindexes(qt, sensors)]
-        return d.values.reshape(len(tidx), -1, qtlen[qt])
+        d = d.values.reshape(len(tidx), -1, qtlen[qt])
+        if smoothn is True:
+            d = robustsmoothing.smoothn(d, **smoothnargs)[0]
+        return d
         
     def qtvals(self, sensors=None, start=None, end=None):
         '''Return the Q0, Qx, Qy, Qz, Tx, Ty, Tz values for given sensors
@@ -228,11 +232,17 @@ class NDIData(object):
             sensors
             xyz coordinates
         '''
-        tvals = self._qt_getter('T', sensors, start, end)
-        if smoothn is True:
-            tvals = robustsmoothing.smoothn(tvals, **smoothnargs)[0]
+        tvals = self._qt_getter(
+            'T', sensors,
+            start, end,
+            smoothn=smoothn, smoothnargs=smoothnargs
+        )
         if fixed_ref is not None:
-            hdvals = self._qt_getter('T', fixed_sensors, start, end)
+            hdvals = self._qt_getter(
+                'T', fixed_sensors,
+                start, end,
+                smoothn=smoothn, smoothnargs=smoothnargs
+            )
             for n in np.arange(tvals.shape[0]):
                 try:
                     q, t = rowan.mapping.davenport(hdvals[n,:3,:], fixed_ref)
