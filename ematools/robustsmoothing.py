@@ -421,7 +421,7 @@ def gcv(p,Lambda,aow,DCTy,IsFinite,Wtot,y,nof,noe,smoothOrder):
     s = 10**p;
     Gamma = 1./(1+(s*abs(Lambda))**smoothOrder);
     #--- RSS = Residual sum-of-squares
-    if np.any(aow>0.9): # aow = 1 means that all of the data are equally weighted
+    if np.all(aow>0.9): # aow = 1 means that all of the data are equally weighted
         # very much faster: does not require any inverse DCT
         RSS = norm(DCTy*(Gamma-1.))**2;
     else:
