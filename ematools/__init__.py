@@ -1,13 +1,48 @@
-from abc import ABC, abstractproperty
+import sys
+from abc import ABC, abstractproperty, abstractmethod
 import numpy as np
 import pandas as pd
 import rowan
 import ematools.robustsmoothing
 
+def coords2df(coords, sec, sensors):
+    '''Convert an ndarray of coordinates to a dataframe.
+
+    Parameters
+    ----------
+    coords : 3D ndarray
+        The coordinate data with axes time, sensors, xyz
+
+    sec : list-like
+        The labels for the first dimension of `coords`
+        (time in seconds). The length must match `coords.shape[0]`.
+
+    sensors : list-like
+        The labels for the second dimension of `coords`
+        (sensors). The length must match `coords.shape[1]`.
+
+    Returns
+    -------
+    df : DataFrame
+        The coordinate data as a DataFrame, one row per time
+        frame and columns of <sensor>_<xyz>. The first column
+        is named 'sec' and contains the labels from input
+        parameter`sec`. The remaining columns are groups of
+       '<sensor>_x', '<sensor>_y', '<sensor>_z', e.g.
+       'REF_x', 'REF_y', 'REF_z', 'OS_x', 'OS_y', 'OS_z'.
+    '''
+    d = coords.reshape(len(sec), len(sensors) * 3)
+    names = []
+    for s in sensors:
+        names.extend([s + '_x', s + '_y', s + '_z'])
+    df = pd.DataFrame(d, columns=names)
+    df.insert(0, 'sec', sec)
+    return df
+
 class NDIData(object):
     '''
     A representation of NDI Wave tsv data.
-    
+
     Instantiate the NDIData object with the path to a .tsv file and mapping of
     sensor names to channel index in the .tsv file. The .tsv file is expected to
     have one (time) column at the left, followed by repetitions of sets
@@ -18,148 +53,149 @@ class NDIData(object):
     of empty columns identified in the header with ' ', which are ignored. The
     Q0...Tz columns may have suffixes appended to them, either in the .tsv file
     or as a side effect of `read_csv`.
-    
+
     The sensor map is a dictionary or list. If a dict, it is of the form
     {'sensor_name': idx, ...}, with the index 0 indicating the first repetition
     of Q0...Tz columns and index 1 for the second repetition. If a list, it is
     a list of sensors in the order they appear in the .tsv file.
-    
-    By default the 'State' values are processed to replace Q0...Tz values with
+
+    The 'State' values are processed to replace Q0...Tz values with
     `Nan` for any sensor-frame that is not 'OK'. Replacement occurs
-    automatically when the `NDIData` object is instantiated unless
-    `replace_bad` is set to `False`.
-    
+    automatically when the `NDIData` object is instantiated.
+
     Access to the .tsv data is available as a dataframe via the `df` attribute:
-    
+
     ```
-    tsv = NDIData(tsvpath, colmap)
+    tsv = NDIData(tsvpath, tsvcolmap)
     tsv.df
     ```
-    
+
     Convenience methods are provided to access the Q0...Tz columns for all
     sensors or a set of sensors as a 3d numpy ndarray, with dimensions 0)
     frame index (time); 1) sensors; 2) Q0...Tz. Use `qtvals` to return
     columns [`Q0`, `Qx`, `Qy`, `Qz`, `Tx`, `Ty`, `Tz`] for a given set of
     sensors. Use `qvals` to return only [`Q0`, `Qx`, `Qy`, `Qz`], and use
-    `tvals` to return only [`Tx`, `Ty`, `Tz`] for the given sensors.
-    
+    `coords` to return only [`Tx`, `Ty`, `Tz`] for the given sensors.
+
     ```
     # Return 3d ndarray (axes: time, sensor, Q0...Tz)
     tsv.qtvals()           # Return Q0, Qx, Qy, Qz, Tx, Ty, Tz for all sensors
     tsv.qvals(['nasion', 'leftMastoid']) # Return Q0, Qx, Qy, Qz for two sensors
-    tsv.tvals(['nasion', 'leftMastoid']) # Return Tx, Ty, Tz for two sensors
+    tsv.coords(['nasion', 'leftMastoid']) # Return Tx, Ty, Tz for two sensors
     '''
 
-    def __init__(self, tsvname, colmap, replace_bad=True, time_col='Wav Time'):
-        ''''''
-        self._sensors = None
-        if isinstance(colmap, dict):
-            self.colmap = colmap
-        else:
-            self.colmap = {
-                s: idx for idx, s in enumerate(colmap) if s is not None
-            }
-        cols_per_sensor = 10  # Number of columns for each sensor
-        cols_at_left = 1      # Number of columns at left, before sensor columns
-        usecols = list(np.arange(cols_at_left))
-        for s in self.sensors:
-            start = (self.colmap[s] * cols_per_sensor) + cols_at_left
-            usecols.extend(np.arange(start, start + cols_per_sensor))
-        usecols = np.array(usecols)
-        # Find empty columns, which have a whitespace-only header.
+    def _inspect_first_line(self, tsvname):
         with open(tsvname, 'r') as fh:
             hd = np.array(fh.readline().split('\t'))
-            for idx in np.argwhere(hd == ' '):
-                usecols[usecols >= np.squeeze(idx)] += 1
+            if hd[0] == 'Wav Time':  # Has a header.
+                skiprows = 1
+            else:
+                skiprows = 0  # No header line.
+        return (hd, skiprows)
+
+    def __init__(self, tsvname, tsvcolmap=None, load_all=False):
+        ''''''
+        subcolumns = ["id","frame","state","q0","qx","qy","qz","x","y","z"]
+        cols_per_sensor = len(subcolumns)  # Number of columns for each sensor
+        cols_at_left = 1      # Number of columns at left, before sensor columns
+        self._rate = None
+        firstline, skiprows = self._inspect_first_line(tsvname)
+        num_empty = len(np.argwhere(firstline == ' '))
+        if tsvcolmap is None or load_all is True:
+            num_sensorcols = len(firstline) - cols_at_left - num_empty
+            assert(num_sensorcols % cols_per_sensor == 0)
+            num_sensors = np.int(num_sensorcols / cols_per_sensor)
+            self.tsvcolmap = {
+                'S{:d}'.format(n): n for n in np.arange(num_sensors)
+            }
+        if isinstance(tsvcolmap, list):
+            tsvcolmap = {
+                s: idx for idx, s in enumerate(tsvcolmap) if s is not None
+            }
+        if tsvcolmap is not None and load_all is False:
+            self.tsvcolmap = tsvcolmap
+        elif tsvcolmap is not None and load_all is True:  # Merge user-provided columns into all sensor columns
+            tsvdf = pd.DataFrame(
+                list(self.tsvcolmap.items()), columns=['sensor', 'idx']) \
+                .set_index('idx')
+            userdf = pd.DataFrame(
+                list(tsvcolmap.items()), columns=['sensor', 'idx']) \
+                .set_index('idx')
+            tsvdf.update(userdf)
+            self.tsvcolmap = dict(zip(tsvdf.sensor, tsvdf.index))
+
+        self.sensors = sorted(self.tsvcolmap, key=lambda x: self.tsvcolmap[x])
+        usecols = list(np.arange(cols_at_left))
+        better_head = ['sec']
+        for s in self.sensors:
+            start = (self.tsvcolmap[s] * cols_per_sensor) + cols_at_left
+            usecols.extend(np.arange(start, start + cols_per_sensor))
+            better_head.extend(['{}_{}'.format(s, c) for c in subcolumns])
+        usecols = np.array(usecols)
+
+        # Find empty columns of only a single space.
+        for idx in np.argwhere(firstline == ' '):
+            usecols[usecols >= np.squeeze(idx)] += 1
         self.df = pd.read_csv(
             tsvname,
             sep='\t',
-            usecols=usecols
+            usecols=usecols,
+            header=None,          # The last three parameters
+            skiprows=skiprows,    # are used to override
+            names=better_head     # the existing file header.
         )
-        self.time_col = time_col
-        if replace_bad is True:
-            self._set_bad_to_nan()
-        # TODO: relabel columns with sensor names?
+        self._set_bad_to_nan()
+        self.df[self.state_cols] = self.df[self.state_cols].astype('category')
 
     @property
-    def sensors(self):
-        '''Ordered list of sensors in the dataframe.'''
-        if self._sensors is None:
-            items = list(self.colmap.items())
-            items.sort(key=lambda x: x[1])
-            self._sensors = [i[0] for i in items]
-        return self._sensors
+    def rate(self):
+        '''The data sample rate.'''
+        if self._rate is None:
+            self._rate = 1.0 / np.mean(np.diff(self.df.sec))
+        return self._rate
+
+    @property
+    def num_sensors(self):
+        '''The number of sensors.'''
+        return len(self.sensors)
+
+    @property
+    def state_cols(self):
+        '''The <sensor>_state column names.'''
+        return [c for c in self.df.columns if c.endswith('_state')]
+
+    def check_for_5d(self):
+        '''Check data for whether data values indicate 5d sensor.'''
+        # All qz columns are expected to be 0.0 (or NaN) if 5d
+        qzcols = self.df.columns.str.endswith('_qz')
+        return np.nansum(self.df.loc[:,qzcols].values) == 0.0
 
     def _set_bad_to_nan(self):
         '''Set values of Q/T columns to NaN if corresponding 'State' column
         is not 'OK'.'''
-        bad = self.df.loc[:,self.df.columns.str.match('[Ss]tate')] != 'OK'
-        qtvals = self.qtvals()
+        bad = self.df.loc[:,self.df.columns.str.match('.+_[Ss]tate$')] != 'OK'
+        qtvals = self.qtvals()[0]
         qtvals[bad] = np.nan  # bad should broadcast along Q0Txyz dimension
         self.replace_columns(qtvals, qt='QT')
-    
-    def qtindexes(self, qt, sensors=None):
-        '''
-        Return a list of column integer indexes in self.df for the
-        Q/T columns for given sensors. The Q/T columns for a given sensor
-        are assumed to be in the order Q0, Qx, Qy, Qz, Tx, Ty, Tz with no
-        other columns intervening.
-            
-        This should be robust whether the Q/T values have additional
-        suffixes or not, e.g. Q0, Q0.1, Q0.15, etc.
-            
-        The value of sensors is a list of the elements found in self.sensors.
-        If sensors is None, include all sensors.
-        '''
 
-        # Get indexes of all Q0/Tx columns.
-        qtmap = {'Q': 'Q0', 'T': 'Tx', 'QT': 'Q0'}
-        q0s = (
-            self.df.columns.str.match('^{:}'.format(qtmap[qt]))
-        ).nonzero()[0]
-
-        # Test our assumption that Q/T0 channels are equally-spaced.
-        try:
-            assert(np.diff(q0s).std() == 0)
-        except AssertionError:
-            msg = 'Q/T channels are not equally-spaced!\n'
-            raise RuntimeError(msg)
-
-        # First get sensor indexes, e.g. in range 0-15.
-        if sensors is None:  # Use all sensors.
-            snums = q0s
-        else:
-            snums = q0s[
-                [np.where(np.array(self.sensors) == s)[0][0] for s in sensors]
-            ]
-        # Add the x,y,z column indexes and flatten the list.
-        if qt == 'Q':
-            qnums = [(n, n+1, n+2, n+3) for n in snums]
-        elif qt == 'T':
-            qnums = [(n, n+1, n+2) for n in snums]
-        elif qt == 'QT':
-            qnums = [(n, n+1, n+2, n+3, n+4, n+5, n+6) for n in snums]
-        flatnums = [item for sublist in qnums for item in sublist]
-        return flatnums
-
-    def replace_columns(self, vals, qt, sensors=None):
+    def replace_columns(self, vals, qt='T', sensors=None):
         '''Replace column data in self.df with new values from an ndarray.
-        
+
         Parameters
         ----------
-        
+
         vals: 2D or 3D ndarray
             New values for replacement. If 3D, `vals` has axes (time, sensors, Q0...Tz)
             and will be reshaped to 2D to match the dataframe column arrangement; the
             latter two dimensions are collapsed. An input 2D array must have the same
             axes arrangement as the reshaped 3D array.
-            
+
         qt: str ('QT', 'Q', or 'T')
             The kinds of new column data in `vals`. Use 'QT' if replacing all 'Q' and
             'T' values. Use 'Q' if replacing only 'Q' values and 'T' if only 'T' values.
             If `vals` is 3D, then the shape of second dimension must match the `qt`
             value: {'QT': 7, 'Q': 4, 'T': 3}.
-            
+
         sensors: list of str
             List of sensor values in `vals`. For 3D `vals` the third axis must be the
             same length as `sensors`.
@@ -176,92 +212,96 @@ class NDIData(object):
             raise ValueError(msg)
         if len(vals.shape) == 3:
             vals = vals.reshape(len(vals), -1)
+        if sensors is None:
+            sensors = self.sensors
         try:
-            self.df.iloc[:, self.qtindexes(qt=qt, sensors=sensors)] = vals
+            self.df.loc[:, self.qtcols(qt=qt, sensors=sensors)] = vals
         except:
             msg = "Could not replace columns with new data.\n"
             raise ValueError(msg)
         return True
 
-    def sensor_mean_tvals(self, sensor):
+    def sensor_mean_coords(self, sensor):
         '''Return the mean x, y, z for sensor, excluding NaN.'''
-        return np.nanmean(np.squeeze(self.tvals(sensor)), axis=0)
+        return np.nanmean(np.squeeze(self.coords(sensor)[0]), axis=0)
 
-    def _qt_getter(self, qt, sensors=None, start=None, end=None,
-            smoothn=False, smoothnargs={}):
-        '''Get Q and/or T values. To be called by qtvals(), qvals(), tvals().'''
+    def _qt_getter(self, qt, sensors=None, start=0.0, end=np.Inf):
+        '''Get Q and/or T values. To be called by qtvals(), qvals(), coords().'''
         qtlen = {'QT': 7, 'Q': 4, 'T': 3}
-        tidx = self.time_range_as_int_index(start, end)
-        if isinstance(sensors, str):
+        if sensors is None:
+            sensors = self.sensors
+        elif isinstance(sensors, str):
             sensors = [sensors]
-        d = self.df.iloc[tidx, self.qtindexes(qt, sensors)]
-        d = d.values.reshape(len(tidx), -1, qtlen[qt])
-        if smoothn is True:
-            d = robustsmoothing.smoothn(d, **smoothnargs)[0]
-        return d
-        
-    def qtvals(self, sensors=None, start=None, end=None):
+        d = self.df.loc[
+            (self.df.sec >= start) & (self.df.sec <= end),
+            self.qtcols(qt=qt, sensors=sensors)
+        ]
+        # Return tuple of:
+        # 0. The data values.
+        # 1. Time in seconds to match the first dimension of the values.
+        # 2. The list of sensor labels for the second dimension of the values.
+        return (
+            d.values.reshape(len(d), len(sensors), qtlen[qt]),
+            self.df.sec[(self.df.sec >= start) & (self.df.sec <= end)],
+            sensors
+        )
+
+    def qtcols(self, qt, sensors=None):
+        '''Get names of Q and/or T columns for given sensors.'''
+        suffixes = {
+            'Q': ['q0', 'qx', 'qy', 'qz'],
+            'T': ['x', 'y', 'z'],
+            'QT': ['q0', 'qx', 'qy', 'qz', 'x', 'y', 'z']
+        }
+        if sensors is None:
+            sensors = self.sensors
+        cols = ['{}_{}'.format(s, sfx) for s in sensors for sfx in suffixes[qt]]
+        return cols
+
+    def qtvals(self, sensors=None, start=0.0, end=np.Inf):
         '''Return the Q0, Qx, Qy, Qz, Tx, Ty, Tz values for given sensors
         as a 3d ndarray. If sensors is None, return all sensors.
-        
+
         The dimensions are:
-            frame index (time)
+            frame index (sec)
             sensors
             0xyz,xyz coordinates
         '''
         return self._qt_getter('QT', sensors, start, end)
 
-    def qvals(self, sensors=None, start=None, end=None):
+    def qvals(self, sensors=None, start=0.0, end=np.Inf):
         '''Return the Q0, Qx, Qy, Qz values for given sensors as a 3d ndarray.
         If sensors is None, return all sensors.
-        
+
         The dimensions are:
-            frame index (time)
+            frame index (sec)
             sensors
             0xyz values
         '''
         return self._qt_getter('Q', sensors, start, end)
 
-    def tvals(self, sensors=None, start=None, end=None, fixed_ref=None,
-        fixed_sensors=None, smoothn=False, smoothnargs={}):
-        '''Return the Tx, Ty, Tz values for given sensors as a 3d ndarray.
+    def coords(self, sensors=None, start=0.0, end=np.Inf):
+        '''Return the x, y, z values for given sensors as a 3d ndarray.
         If sensors is None, return all sensors.
-        
+
         The dimensions are:
-            frame index (time)
+            frame index (sec)
             sensors
             xyz coordinates
         '''
-        tvals = self._qt_getter(
-            'T', sensors,
-            start, end,
-            smoothn=smoothn, smoothnargs=smoothnargs
-        )
-        if fixed_ref is not None:
-            hdvals = self._qt_getter(
-                'T', fixed_sensors,
-                start, end,
-                smoothn=smoothn, smoothnargs=smoothnargs
-            )
-            for n in np.arange(tvals.shape[0]):
-                try:
-                    q, t = rowan.mapping.davenport(hdvals[n,:3,:], fixed_ref)
-                    tvals[n,:,:] = rowan.rotate(q, tvals[n,:,:]) + t
-                except Exception as e:
-                    tvals[n,:,:] = np.nan
-        return tvals
+        return self._qt_getter('T', sensors, start, end)
 
     def time_range_as_int_index(self, start=None, end=None):
         '''Return the 0-based integer indexes of the rows in self.df where the time column
         is in the range specified by `start` and `end`.
-        
+
         Parameters
         ----------
-        
+
         start: numeric
             The start time for the returned range. Integer indexes for times greater than or
             equal to `start` are returned. If `start` is not specified, 0.0 is the default.
-            
+
         end: numeric
             The end time for the returned range. Integer indexes for times less than or
             equal to `end` are returned. If `end` is not specified, np.Inf is the default.
@@ -271,29 +311,51 @@ class NDIData(object):
         if end is None:
             end = np.Inf
         return np.flatnonzero(
-            (self.df[self.time_col] >= start) & (self.df[self.time_col] <= end)
+            (self.df['sec'] >= start) & (self.df['sec'] <= end)
         )
 
     def time_range(self, start=None, end=None):
         '''Return the time values for the range specified by `start` and `end`.'''
         tidx = self.time_range_as_int_index(start=start, end=end)
-        return self.df[self.time_col].iloc[tidx].values
+        return self.df['sec'].iloc[tidx].values
 
-class BiteplateRec(ABC):
-    '''A mixin for biteplate reference recordings.'''
+class RotationRef(ABC):
+    '''A mixin for reference recordings used to rotate to ideal head position.'''
+
+    @abstractproperty
+    def is_6DOF(self):
+        '''Return True if reference sensor has 6 Degrees Of Freedom or False
+        if reference sensor has 5DOF.
+        '''
+        pass
+
+    @abstractmethod
+    def transform(self, coords):
+        '''Transform (rotate and translate) a 3d set of sensor points into the
+        reference space.'''
+        pass
+
+# TODO: parameter and attribute names are not necessarily sensible and meaningful.
+class WaxBiteplate5D(NDIData, RotationRef):
+    '''A class for wax biteplate recordings using the 5DOF nasion sensor.'''
     _origin = None
     _nasion = None
     _right = None
     _left = None
     _head_loc = None
 
-    @abstractproperty
-    def translation(self):
-        '''
-        Get x, y, z of translation that moves a defined point or sensor to
-        the origin.
-        '''
-        pass
+    def __init__(self, tsvname, tsvcolmap, nasion='REF', right_mastoid='RMA',
+            left_mastoid='LMA', origin='OS', molar='MS', *args, **kwargs):
+        super(WaxBiteplate5D, self).__init__(tsvname, tsvcolmap, **kwargs)
+        self._nasion = nasion
+        self._right = right_mastoid
+        self._left = left_mastoid
+        self._origin = origin
+        self._molar = molar
+
+    @property
+    def is_6DOF(self):
+        return False
 
     @property
     def fixed_sensors(self):
@@ -316,10 +378,10 @@ class BiteplateRec(ABC):
             )
 
             # 2) now find the rotation matrix to the occlusal coordinate system
-            z = np.cross(ms_t, ref_t)  # z is perpendicular to ms and ref vectors
+            z = np.cross(ref_t, ms_t)  # z is perpendicular to ms and ref vectors
             z = z / np.linalg.norm(z)
 
-            y = np.cross(z, ms_t)        # y is perpendicular to z and ms
+            y = np.cross(ms_t, z)        # y is perpendicular to z and ms
             y = y / np.linalg.norm(y)
 
             x = np.cross(y, z)
@@ -329,7 +391,7 @@ class BiteplateRec(ABC):
 
             # 3) now rotate the mastoid points - using the rotation matrix
             ref_t = np.dot(ref_t, m.T)
-            rma_t = np.dot(rma_t, m.T) 
+            rma_t = np.dot(rma_t, m.T)
             lma_t = np.dot(lma_t, m.T)
 
             self._head_loc = np.vstack([ref_t, rma_t, lma_t])
@@ -337,20 +399,77 @@ class BiteplateRec(ABC):
 
     def translated_sensors(self, sensors):
         '''Return sensor data translated so that the origin sensor is at [0.0, 0.0, 0.0].'''
-        return np.nanmean(self.tvals(sensors), axis=0) + self.translation
-
-# TODO: parameter and attribute names are not necessarily sensible and meaningful.
-class WaxBiteplateRec(NDIData, BiteplateRec):
-    '''A class for wax biteplate recordings.'''
-    def __init__(self, tsvname, colmap, nasion='REF', right_mastoid='RMA', left_mastoid='LMA', origin='OS', molar='MS', *args, **kwargs):
-        super(WaxBiteplateRec, self).__init__(tsvname, colmap, **kwargs)
-        self._nasion = nasion
-        self._right = right_mastoid
-        self._left = left_mastoid
-        self._origin = origin
-        self._molar = molar
+        return np.nanmean(self.coords(sensors)[0], axis=0) + self.translation
 
     @property
     def translation(self):
-        return -(self.sensor_mean_tvals(self._origin))
+        return -(self.sensor_mean_coords(self._origin))
+
+    def transform(self, coords, sensor_labels):
+        sensor_order = {s: idx for idx, s in enumerate(sensor_labels)}
+        ref_cols = [
+            sensor_order[self._nasion],
+            sensor_order[self._right],
+            sensor_order[self._left]
+        ]
+        if len(coords.shape) == 2:
+            coords = np.expand_dims(coords, axis=0)
+        for n in np.arange(coords.shape[0]):
+            try:
+                q, t = rowan.mapping.davenport(
+                    coords[n, ref_cols, :],
+                    self.fixed_ref
+                )
+                coords[n,:,:] = rowan.rotate(q, coords[n,:,:]) + t
+            except Exception as e:
+                coords[n,:,:] = np.nan
+        return coords
+
+class WaxBiteplate6D(NDIData, RotationRef):
+    '''A class for wax biteplate recordings using the 6DOF nasion sensor.
+
+    Values for the 6DOF sensor are imputed to be 0.0 whether the sensor
+    exists in the .tsv file or not.
+    '''
+    def __init__(self, tsvname, tsvcolmap, origin='OS', molar='MS',
+            *args, **kwargs):
+        super(WaxBiteplate6D, self).__init__(tsvname, tsvcolmap, **kwargs)
+        self._origin = origin
+        self._molar = molar
+        self._quaternion = None
+
+    @property
+    def is_6DOF(self):
+        return True
+
+    @property
+    def ref_quaternion(self):
+        '''Return quaternion for rotating data into occlusal plane.'''
+        if self._quaternion is None:
+            # 1) start by translating the space so origin sensor is at the origin
+            REF = self.ref_translation
+            MS = self.sensor_mean_coords(self._molar) + self.ref_translation
+
+            # 2) now find the rotation matrix to the occlusal coordinate system
+            z = np.cross(REF, MS)  # z is perpendicular to ms and ref vectors
+            z = z / np.linalg.norm(z)
+
+            y = np.cross(MS, z)        # y is perpendicular to z and ms
+            y = y / np.linalg.norm(y)
+
+            x = np.cross(y, z)
+            x = x / np.linalg.norm(x)
+
+            m = np.array([x, y, z])    # rotation matrix directly
+            self._quaternion = rowan.from_matrix(m)
+        return self._quaternion
+
+    @property
+    def ref_translation(self):
+        return -(self.sensor_mean_coords(self._origin))
+
+    def transform(self, coords):
+        if len(coords.shape) == 2:
+            coords = np.expand_dims(coords, axis=0)
+        return rowan.rotate(self.ref_quaternion, coords) + self.ref_translation
 
