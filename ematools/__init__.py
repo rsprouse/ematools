@@ -5,6 +5,26 @@ import pandas as pd
 import rowan
 import ematools.robustsmoothing
 
+def rotation_ref_creator(tsvname, tsvcolmap, *args, **kwargs):
+    '''Return RotationRef object of correct type.'''
+    try:
+        sensors = list(tsvcolmap.keys())  # Input is a dict
+    except AttributeError:
+        sensors = tsvcolmap    # Already a list.
+    params = list(kwargs.keys())
+    refname = kwargs['nasion'] if 'nasion' in params else 'REF'
+    rmaname = kwargs['right_mastoid'] if 'right_mastoid' in params else 'RMA'
+    lmaname = kwargs['left_mastoid'] if 'left_mastoid' in params else 'LMA'
+    if refname in sensors and rmaname in sensors and lmaname in sensors:
+        rotref = WaxBiteplate3Point(tsvname, tsvcolmap, *args, **kwargs)
+    elif not (refname in sensors or rmaname in sensors or lmaname in sensors):
+        rotref = WaxBiteplateReferenced(tsvname, tsvcolmap, *args, **kwargs)
+    else:
+        msg = 'Could not return correct RotationRef based on input sensors. ' \
+            'Sensors should include all of \'REF\', \'RMA\', \'LMA\' or none.\n'
+        raise TypeError(msg)
+    return rotref
+
 def coords2df(coords, sec, sensors):
     '''Convert an ndarray of coordinates to a dataframe.
 
@@ -101,6 +121,7 @@ class NDIData(object):
         self._rate = None
         firstline, skiprows = self._inspect_first_line(tsvname)
         num_empty = len(np.argwhere(firstline == ' '))
+        # TODO: tsvcolmap processing could probably be cleaned up
         if tsvcolmap is None or load_all is True:
             num_sensorcols = len(firstline) - cols_at_left - num_empty
             assert(num_sensorcols % cols_per_sensor == 0)
@@ -323,9 +344,9 @@ class RotationRef(ABC):
     '''A mixin for reference recordings used to rotate to ideal head position.'''
 
     @abstractproperty
-    def is_6DOF(self):
-        '''Return True if reference sensor has 6 Degrees Of Freedom or False
-        if reference sensor has 5DOF.
+    def has_global_ref(self):
+        '''Return True if reference sensor is a 6 Degrees Of Freedom global
+        reference for other sensor data.
         '''
         pass
 
@@ -336,7 +357,7 @@ class RotationRef(ABC):
         pass
 
 # TODO: parameter and attribute names are not necessarily sensible and meaningful.
-class WaxBiteplate5D(NDIData, RotationRef):
+class WaxBiteplate3Point(NDIData, RotationRef):
     '''A class for wax biteplate recordings using the 5DOF nasion sensor.'''
     _origin = None
     _nasion = None
@@ -346,7 +367,7 @@ class WaxBiteplate5D(NDIData, RotationRef):
 
     def __init__(self, tsvname, tsvcolmap, nasion='REF', right_mastoid='RMA',
             left_mastoid='LMA', origin='OS', molar='MS', *args, **kwargs):
-        super(WaxBiteplate5D, self).__init__(tsvname, tsvcolmap, **kwargs)
+        super(WaxBiteplate3Point, self).__init__(tsvname, tsvcolmap, **kwargs)
         self._nasion = nasion
         self._right = right_mastoid
         self._left = left_mastoid
@@ -354,7 +375,7 @@ class WaxBiteplate5D(NDIData, RotationRef):
         self._molar = molar
 
     @property
-    def is_6DOF(self):
+    def has_global_ref(self):
         return False
 
     @property
@@ -425,21 +446,21 @@ class WaxBiteplate5D(NDIData, RotationRef):
                 coords[n,:,:] = np.nan
         return coords
 
-class WaxBiteplate6D(NDIData, RotationRef):
-    '''A class for wax biteplate recordings using the 6DOF nasion sensor.
-
-    Values for the 6DOF sensor are imputed to be 0.0 whether the sensor
-    exists in the .tsv file or not.
+class WaxBiteplateReferenced(NDIData, RotationRef):
+    '''A class for wax biteplate recordings using that use the 6DOF nasion
+    sensor as a global reference.
     '''
     def __init__(self, tsvname, tsvcolmap, origin='OS', molar='MS',
             *args, **kwargs):
-        super(WaxBiteplate6D, self).__init__(tsvname, tsvcolmap, **kwargs)
+        super(WaxBiteplateReferenced, self).__init__(
+            tsvname, tsvcolmap, **kwargs
+        )
         self._origin = origin
         self._molar = molar
         self._quaternion = None
 
     @property
-    def is_6DOF(self):
+    def has_global_ref(self):
         return True
 
     @property
