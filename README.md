@@ -7,4 +7,4 @@ Python tools for working with EMA data.
 
 ## Usage
 
-See the [demo notebook](doc/ematools_demo.ipynb) for sample usage.
+See the [demo notebook](https://nbviewer.jupyter.org/github/rsprouse/ematools/blob/master/doc/ematools_demo.ipynb) for sample usage.
