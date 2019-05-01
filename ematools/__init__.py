@@ -3,7 +3,6 @@ from abc import ABC, abstractproperty, abstractmethod
 import numpy as np
 import pandas as pd
 import rowan
-import ematools.robustsmoothing
 
 def rotation_ref_creator(tsvname, tsvcolmap, *args, **kwargs):
     '''Return RotationRef object of correct type.'''
