@@ -364,9 +364,11 @@ class WaxBiteplate3Point(NDIData, RotationRef):
     _left = None
     _head_loc = None
 
-    def __init__(self, tsvname, tsvcolmap, nasion='REF', right_mastoid='RMA',
-            left_mastoid='LMA', origin='OS', molar='MS', *args, **kwargs):
+    def __init__(self, tsvname, tsvcolmap, origin_correction=(0.0,0.0,0.0),
+            nasion='REF', right_mastoid='RMA', left_mastoid='LMA',
+            origin='OS', molar='MS', *args, **kwargs):
         super(WaxBiteplate3Point, self).__init__(tsvname, tsvcolmap, **kwargs)
+        self._origin_correction = origin_correction
         self._nasion = nasion
         self._right = right_mastoid
         self._left = left_mastoid
@@ -414,7 +416,7 @@ class WaxBiteplate3Point(NDIData, RotationRef):
             rma_t = np.dot(rma_t, m.T)
             lma_t = np.dot(lma_t, m.T)
 
-            self._head_loc = np.vstack([ref_t, rma_t, lma_t])
+            self._head_loc = np.vstack([ref_t, rma_t, lma_t]) + self.origin_correction
         return self._head_loc
 
     def translated_sensors(self, sensors):
@@ -449,11 +451,12 @@ class WaxBiteplateReferenced(NDIData, RotationRef):
     '''A class for wax biteplate recordings using that use the 6DOF nasion
     sensor as a global reference.
     '''
-    def __init__(self, tsvname, tsvcolmap, origin='OS', molar='MS',
-            *args, **kwargs):
+    def __init__(self, tsvname, tsvcolmap, origin_correction=(0.0,0.0,0.0),
+            origin='OS', molar='MS', *args, **kwargs):
         super(WaxBiteplateReferenced, self).__init__(
             tsvname, tsvcolmap, **kwargs
         )
+        self._origin_correction = origin_correction
         self._origin = origin
         self._molar = molar
         self._quaternion = None
@@ -486,7 +489,7 @@ class WaxBiteplateReferenced(NDIData, RotationRef):
 
     @property
     def ref_translation(self):
-        return -(self.sensor_mean_coords(self._origin))
+        return -(self.sensor_mean_coords(self._origin)) + self.origin_correction
 
     def transform(self, coords):
         if len(coords.shape) == 2:
