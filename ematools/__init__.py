@@ -7,7 +7,9 @@ import rowan
 def rotation_ref_creator(tsvname, tsvcolmap, *args, **kwargs):
     '''Return RotationRef object of correct type.'''
     try:
-        sensors = list(tsvcolmap.keys())  # Input is a dict
+        sensors = [None] * len(tsvcolmap)
+        for s, idx in tsvcolmap.items():
+            sensors[idx] = s
     except AttributeError:
         sensors = tsvcolmap    # Already a list.
     params = list(kwargs.keys())
