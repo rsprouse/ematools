@@ -1,4 +1,5 @@
 import sys
+import warnings
 from abc import ABC, abstractproperty, abstractmethod
 import numpy as np
 import pandas as pd
@@ -447,6 +448,10 @@ class WaxBiteplate3Point(NDIData, RotationRef):
                 )
                 coords[n,:,:] = rowan.rotate(q, coords[n,:,:]) + t
             except Exception as e:
+                warnings.warn(
+                    'Caught an error and emitting NaNs.\nError message:\n' + \
+                    str(e)
+                )
                 coords[n,:,:] = np.nan
         return coords
 
