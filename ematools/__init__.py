@@ -418,7 +418,8 @@ class WaxBiteplate3Point(NDIData, RotationRef):
             rma_t = np.dot(rma_t, m.T)
             lma_t = np.dot(lma_t, m.T)
 
-            self._head_loc = np.vstack([ref_t, rma_t, lma_t]) + self.origin_correction
+            self._head_loc = np.vstack([ref_t, rma_t, lma_t]) \
+                                 + self._origin_correction
         return self._head_loc
 
     def translated_sensors(self, sensors):
@@ -491,7 +492,8 @@ class WaxBiteplateReferenced(NDIData, RotationRef):
 
     @property
     def ref_translation(self):
-        return -(self.sensor_mean_coords(self._origin)) + self.origin_correction
+        return -(self.sensor_mean_coords(self._origin)) \
+                   + self._origin_correction
 
     def transform(self, coords):
         if len(coords.shape) == 2:
