@@ -210,7 +210,17 @@ class NDIData(object):
             skiprows=skiprows,    # are used to override
             names=better_head     # the existing file header.
         )
-        self._set_bad_to_nan(keep_states)
+        try:
+            self._set_bad_to_nan(keep_states)
+        except AttributeError:
+            # Sometimes the last row of a .tsv is incomplete, and the *_state
+            # columns might have NaN, which fails with AttributeError when
+            # str methods are applied to it. Drop the last row and try again.
+            sys.stderr.write(
+                f'Warning: Dropped possible incomplete last row in {tsvname}.\n'
+            )
+            self.df = self.df.drop(self.df.tail(1).index)
+            self._set_bad_to_nan(keep_states)
         self.df[self.state_cols] = self.df[self.state_cols].astype('category')
 
     @property
