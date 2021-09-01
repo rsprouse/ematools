@@ -243,6 +243,7 @@ class NDIData(object):
             return
         if isinstance(keep_states, str):
             keep_states = [keep_states]
+        keep_states = [ks.lower() for ks in keep_states]
         bad = ~self.df.loc[:, self.df.columns.str.match('.+_[Ss]tate$')] \
             .applymap(lambda s: s.lower()).isin(keep_states)
         qtvals = self.qtvals()[0]
