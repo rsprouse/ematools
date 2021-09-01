@@ -82,8 +82,50 @@ class NDIData(object):
     a list of sensors in the order they appear in the .tsv file.
 
     The 'State' values are processed to replace Q0...Tz values with
-    `Nan` for any sensor-frame that is not 'OK'. Replacement occurs
-    automatically when the `NDIData` object is instantiated.
+    `Nan` for any sensor-frames with bad values. Replacement occurs
+    automatically when the `NDIData` object is instantiated according
+    to the 'State' values specified by the `keep_states` param.
+
+    Parameters
+    ----------
+
+    tsvname: filename
+    The input .tsv filename.
+
+    tsvcolmap: list or dict
+    A list or dict that maps sensor names to the `SX_*` column labels found in
+    the input .tsv file. If a list, each value in the list is mapped to that
+    value's index in the list. If a dict, the keys are sensor names, and their
+    values are the index. For example the following values of `tsvcolmap`
+    will map 'REF' to 'S3_*', 'JAW' to 'S5_*', and 'LMA' to 'S8_*',
+
+    ```
+    {'REF': 3, 'JAW': 5, 'LMA': 8}
+    [None, None, None, 'REF', None, 'JAW', None, None, 'LMA']
+    ```
+
+    load_all: bool (default False)
+    When False, only sensors identified in `tsvcolmap` are loaded. When True,
+    all sensors are loaded. But if `tsvcolmap` is None, then this parameter
+    has no effect and all sensors are loaded.
+
+    keep_states: str or list of str (default 'OK')
+    Values of the 'State' column that are not one of the states specified
+    by `keep_states` are replaced with NaN. For example, if `keep_states`
+    is `['OK', 'Out of volume']`, then sensor values corresponding to the
+    states 'Tool missing', 'Processing Error', and any other states will
+    be replaced with NaN. Matching of states is done in a case-insensitive
+    fashion. Use the value `[]` to prevent any values from being replaced
+    with NaN.
+
+    Returns
+    -------
+
+    self: NDIData object
+
+
+    Examples
+    --------
 
     Access to the .tsv data is available as a dataframe via the `df` attribute:
 
@@ -115,7 +157,8 @@ class NDIData(object):
                 skiprows = 0  # No header line.
         return (hd, skiprows)
 
-    def __init__(self, tsvname, tsvcolmap=None, load_all=False):
+    def __init__(self, tsvname, tsvcolmap=None, load_all=False,
+            keep_states='OK'):
         ''''''
         subcolumns = ["id","frame","state","q0","qx","qy","qz","x","y","z"]
         cols_per_sensor = len(subcolumns)  # Number of columns for each sensor
@@ -167,7 +210,7 @@ class NDIData(object):
             skiprows=skiprows,    # are used to override
             names=better_head     # the existing file header.
         )
-        self._set_bad_to_nan()
+        self._set_bad_to_nan(keep_states)
         self.df[self.state_cols] = self.df[self.state_cols].astype('category')
 
     @property
@@ -193,10 +236,15 @@ class NDIData(object):
         qzcols = self.df.columns.str.endswith('_qz')
         return np.nansum(self.df.loc[:,qzcols].values) == 0.0
 
-    def _set_bad_to_nan(self):
+    def _set_bad_to_nan(self, keep_states):
         '''Set values of Q/T columns to NaN if corresponding 'State' column
-        is not 'OK'.'''
-        bad = self.df.loc[:,self.df.columns.str.match('.+_[Ss]tate$')] != 'OK'
+        is not in `keep_states`.'''
+        if keep_states == []:
+            return
+        if isinstance(keep_states, str):
+            keep_states = [keep_states]
+        bad = ~self.df.loc[:, self.df.columns.str.match('.+_[Ss]tate$')] \
+            .applymap(lambda s: s.lower()).isin(keep_states)
         qtvals = self.qtvals()[0]
         qtvals[bad] = np.nan  # bad should broadcast along Q0Txyz dimension
         self.replace_columns(qtvals, qt='QT')
