@@ -3,7 +3,7 @@ Python tools for working with EMA data.
 
 ## Install
 
-    pip install git+git://github.com/rsprouse/ematools
+    pip install git+https://github.com/rsprouse/ematools
 
 ## Usage
 
