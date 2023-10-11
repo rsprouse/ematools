@@ -170,7 +170,7 @@ class NDIData(object):
         if tsvcolmap is None or load_all is True:
             num_sensorcols = len(firstline) - cols_at_left - num_empty
             assert(num_sensorcols % cols_per_sensor == 0)
-            num_sensors = np.int(num_sensorcols / cols_per_sensor)
+            num_sensors = int(num_sensorcols / cols_per_sensor)
             self.tsvcolmap = {
                 'S{:d}'.format(n): n for n in np.arange(num_sensors)
             }
